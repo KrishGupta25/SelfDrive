@@ -36,7 +36,11 @@ class CarEnv(gym.Env):
 	CAMERA_POS_X = 1.4
 	PREFERRED_SPEED = 30 # what it says
 	SPEED_THRESHOLD = 2 #defines when we get close to desired speed so we drop the
+	EPISODE_DONE = False
+	EPISODE_REWARD = int(0)
 	
+
+
 	def __init__(self):
 		super(CarEnv, self).__init__()
         # Define action and observation space
@@ -71,6 +75,12 @@ class CarEnv(gym.Env):
 		if self.SHOW_CAM:
 			self.spectator = self.world.get_spectator()	
 	
+	def writeFile(self):
+		f = open("testing2.txt", "a")
+		f.write("\n" + str(self.EPISODE_REWARD))
+		f.close()
+		self.EPISODE_REWARD = 0
+
 	def cleanup(self):
 		for sensor in self.world.get_actors().filter('*sensor*'):
 			sensor.destroy()
@@ -97,15 +107,18 @@ class CarEnv(gym.Env):
 		cnn_applied = self.cnn_model([img,0],training=False)
 		cnn_applied = np.squeeze(cnn_applied)
 		return  cnn_applied ##[0][0]
+	
 	def step(self, action):
+		##print("HII " + str(self.initial_location.distance(self.vehicle.get_location())))
+		
 		trans = self.vehicle.get_transform()
 		if self.SHOW_CAM:
 			self.spectator.set_transform(carla.Transform(trans.location + carla.Location(z=20),carla.Rotation(yaw =-180, pitch=-90)))
 
 		self.step_counter +=1
 		steer = action[0]
-		
-		# map steering actions
+
+				# map steering actions
 		if steer ==0:
 			steer = - 0.9
 		elif steer ==1:
@@ -129,15 +142,27 @@ class CarEnv(gym.Env):
 		if self.step_counter % 50 == 0:
 			print('steer input from model:',steer)
 		
+		
+		if self.step_counter == 1:
+			self.initial_location = self.vehicle.get_location()
+				
+		#print("get pre location: "+ str(self.vehicle.get_location()))
+		
 		v = self.vehicle.get_velocity()
-		kmh = int(3.6 * math.sqrt(v.x**2 + v.y**2 + v.z**2))
+		kmh = int(3.6*math.sqrt(v.x**2 + v.y**2 + v.z**2))
 		estimated_throttle = self.maintain_speed(kmh)
+		#print("Estimate throttle: "+ str(estimated_throttle))
 		# map throttle and apply steer and throttle	
+		
+
 		self.vehicle.apply_control(carla.VehicleControl(throttle=estimated_throttle, steer=steer, brake = 0.0))
 
 
 		distance_travelled = self.initial_location.distance(self.vehicle.get_location())
-
+		#print("initial location: "+ str(self.initial_location))
+		#print("get location location: "+ str(self.vehicle.get_location()))
+	
+		##print("step counter: " + str(self.step_counter) + ", distance: " + str(distance_travelled))
 		# storing camera to return at the end in case the clean-up function destroys it
 		cam = self.front_camera
 		# showing image
@@ -156,47 +181,87 @@ class CarEnv(gym.Env):
 				lock_duration = time.time() - self.steering_lock_start
 		
 		# start defining reward from each step
-		reward = 0
+		reward = int(0)
 		done = False
+		self.EPISODE_DONE = False
 		#punish for collision
 		if len(self.collision_hist) != 0:
 			done = True
+			#self.EPISODE_DONE = True
+			#self.EPISODE_REWARD = reward
 			reward = reward - 300
+			self.EPISODE_REWARD += reward
+			self.writeFile()
 			self.cleanup()
 		if len(self.lane_invade_hist) != 0:
 			done = True
+			#self.EPISODE_DONE = True
+			#self.EPISODE_REWARD = reward
 			reward = reward - 300
+			self.EPISODE_REWARD += reward
+			self.writeFile()
 			self.cleanup()
 		# punish for steer lock up
 		if lock_duration>3:
 			reward = reward - 150
 			done = True
+			#self.EPISODE_DONE = True
+			#self.EPISODE_REWARD = reward
+			self.EPISODE_REWARD += reward
+			self.writeFile()
 			self.cleanup()
-		elif lock_duration > 1:
+		elif lock_duration > 1 and not done:
 			reward = reward - 20
-		#reward for acceleration
-		#if kmh < 10:
-		#	reward = reward - 3
-		#elif kmh <15:
-		#	reward = reward -1
-		#elif kmh>40:
-		#	reward = reward - 10 #punish for going to fast
-		#else:
-		#	reward = reward + 1
-		# reward for making distance
-		if distance_travelled<30:
-			reward = reward - 1
-		elif distance_travelled<50:
-			reward =  reward + 1
-		else:
-			reward = reward + 2
-		# check for episode duration
-		if self.episode_start + SECONDS_PER_EPISODE < time.time():
+		if not done: 
+			#reward for acceleration
+			#if kmh < 10:
+			#	reward = reward - 3
+			#elif kmh <15:
+			#	reward = reward -1
+			#elif kmh>40:
+			#	reward = reward - 10 #punish for going to fast
+			#else:
+			#	reward = reward + 1
+			# reward for making distance
+			if distance_travelled<30:
+				reward = reward - 1
+			elif distance_travelled<50:
+				reward =  reward + 1
+			else:
+				reward = reward + 2
+			''' Krish's Reward
+			if distance_travelled < 5:
+				reward = reward - 1 
+			elif distance_travelled < 10:
+				reward = reward + 1
+			elif distance_travelled < 20:
+				reward = reward + 2
+			elif distance_travelled<30:
+				reward = reward + 3
+			elif distance_travelled<40:
+				reward = reward + 4
+			elif distance_travelled<50:
+				reward =  reward + 5
+			else:
+				reward = reward + 10
+				#print(str(reward))
+			''' 
+			# check for episode duration
+		if (self.episode_start + SECONDS_PER_EPISODE < time.time()) and not done:
 			done = True
+			self.EPISODE_REWARD += reward
+			self.writeFile()
+			#self.EPISODE_DONE = True
+			#self.EPISODE_REWARD = reward
 			self.cleanup()
-		self.image_for_CNN = self.apply_cnn(self.front_camera[self.height_from:,self.width_from:self.width_to])
 
+		self.image_for_CNN = self.apply_cnn(self.front_camera[self.height_from:,self.width_from:self.width_to])
+		#print("reward: " + str(reward))
+		if not done:
+			self.EPISODE_REWARD += reward
+		#print(distance_travelled)
 		return self.image_for_CNN, reward, done, {}	#curly brackets - empty dictionary required by SB3 format
+
 
 	def reset(self):
 		self.collision_hist = []
@@ -212,8 +277,6 @@ class CarEnv(gym.Env):
 			except:
 				pass
 		self.actor_list.append(self.vehicle)
-
-
 
 		self.initial_location = self.vehicle.get_location()
 		self.sem_cam = self.blueprint_library.find('sensor.camera.semantic_segmentation')

@@ -20,9 +20,29 @@ Terminology:
 '''
 
 from stable_baselines3 import PPO #PPO
+from stable_baselines3.common.callbacks import BaseCallback
 import os
 from environment import CarEnv
 import time
+
+class TensorboardCallback(BaseCallback):
+    """
+    Custom callback for plotting additional values in tensorboard.
+    """
+
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+
+    def _on_step(self) -> bool:
+        # Log scalar value (here a random variable)
+        # print((self.locals[""]).keys())
+        print(self.locals["infos"].keys())
+        value = self.locals["infos"][0]['EPISODE_DONE']
+        if value:
+              reward = self.locals["infos"][0]['EPISODE_REWARD']
+              self.logger.record('REWARD', reward)
+        return True
+
 
 
 print('This is the start of training script')
@@ -45,9 +65,9 @@ env.reset()
 print('Env has been reset as part of launch')
 model = PPO('MlpPolicy', env, verbose=1,learning_rate=0.001, tensorboard_log=logdir)
 
-TIMESTEPS = 500_000 # how long is each training iteration - individual steps
+TIMESTEPS = 1_000_000 # how long is each training iteration - individual steps
 iters = 0
-while iters<4:  # how many training iterations you want
+while iters<1:  # how many training iterations you want
 	iters += 1
 	print('Iteration ', iters,' is to commence...')
 	model.learn(total_timesteps=TIMESTEPS, reset_num_timesteps=False, tb_log_name=f"PPO" )
